@@ -1,6 +1,8 @@
 # Install duke-sso-auth from GitHub
 duke-sso-auth @ git+https://github.com/256thFission/duke-sso-auth.git
 
-# Additional dependencies for course scraper
-# (requests, beautifulsoup4, lxml are already installed by duke-sso-auth)
+# Additional dependencies
+# (requests is included with duke-sso-auth)
 python-dotenv>=1.0.0
+beautifulsoup4>=4.12.0  # For HTML parsing in course_eval_scraper
+lxml>=4.9.0  # Parser for BeautifulSoup
