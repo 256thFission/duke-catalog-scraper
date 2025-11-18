@@ -1,12 +1,10 @@
 """
-Basic example of using the Duke course scraper.
+Basic Duke course scraper.
 
 This script demonstrates how to:
 1. Set up authentication with an MFA cookie
 2. Search for courses
 3. Save results to JSON and CSV
-
-Configuration can be set via .env file (see .env.example)
 """
 
 import os
@@ -34,22 +32,32 @@ def main():
     delay = float(os.getenv("REQUEST_DELAY", "0.5"))
     output_dir = Path(os.getenv("OUTPUT_DIR", "data"))
 
-    # Create output directory if it doesn't exist
     output_dir.mkdir(parents=True, exist_ok=True)
 
     auth = DukeSSOAuth(cookie_file=session_file)
 
-    # Option 1: Use an existing session (if you've logged in before)
+    # First try to use a cached session from session_file
     if auth.login():
-        print("\nAuthentication successful!")
+        print("\nUsing cached DukeHub session.")
     else:
-        print("\nAuthentication failed.")
-        print("\nTo set up authentication:")
-        print("1. Log in to DukeHub in your browser with 'Remember me' checked")
-        print("2. Export cookies or use browser dev tools to get the 'mfa' cookie value")
-        print("3. Run the setup script:")
-        print("   python examples/setup_auth.py")
-        return
+        print("\nNo cached session found or session expired.")
+        # Fall back to credential-based login with Duo push (credentials from env)
+        username = os.getenv("DUKE_NETID")
+        password = os.getenv("DUKE_PASSWORD")
+
+        if not username or not password:
+            print("Please set DUKE_NETID and DUKE_PASSWORD environment variables before running this example.")
+            return
+
+        duo_device_id = None  # Use default Duo device
+
+        if not auth.login_with_credentials(username, password, duo_device_id):
+            print("\nCredential-based login failed. Check your NetID/password and Duo approval.")
+            return
+
+        # Cache the authenticated session for future runs
+        auth.save_session()
+        print("\nAuthentication successful and session cached.")
 
     # Initialize the scraper
     scraper = DukeCourseScraper(auth)

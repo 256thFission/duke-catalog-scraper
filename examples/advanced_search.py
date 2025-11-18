@@ -131,9 +131,28 @@ def main():
 
     # Initialize authentication
     auth = DukeSSOAuth(cookie_file=session_file)
-    if not auth.login():
-        print("Authentication failed. Run setup_auth.py first.")
-        return
+
+    # First try to use a cached session from session_file
+    if auth.login():
+        print("\nUsing cached DukeHub session.")
+    else:
+        print("\nNo cached session found")
+        username = os.getenv("DUKE_NETID")
+        password = os.getenv("DUKE_PASSWORD")
+
+        if not username or not password:
+            print("Please set DUKE_NETID and DUKE_PASSWORD environment variables before running this example.")
+            return
+
+        duo_device_id = None  # Use default Duo device
+
+        if not auth.login_with_credentials(username, password, duo_device_id):
+            print("\nCredential-based login failed. Check your NetID/password and Duo approval.")
+            return
+
+        # Cache the authenticated session for future runs
+        auth.save_session()
+        print("\nAuthentication successful and session cached.")
 
     scraper = DukeCourseScraper(auth)
 
