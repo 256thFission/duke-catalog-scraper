@@ -11,7 +11,7 @@ import re
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlencode, unquote
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 import requests
 
@@ -31,10 +31,7 @@ class DukeCourseEvalScraper:
 
     SEARCH_URL = "https://eval-duke.evaluationkit.com/Report/Public/Results"
     SESSION_STATUS_URL = "https://eval-duke.evaluationkit.com/api2/session/status"
-
-    # TODO: Determine the exact report URL pattern
-    # This will be set after we capture the View Report click
-    REPORT_URL_TEMPLATE = None  # e.g., "https://eval-duke.evaluationkit.com/Report/Public/View"
+    REPORT_URL = "https://eval-duke.evaluationkit.com/Reports/StudentReport.aspx"
 
     def __init__(self, cookies: Dict[str, str]):
         """
@@ -241,27 +238,21 @@ class DukeCourseEvalScraper:
         Returns:
             Path to the saved HTML file, or None if failed
         """
-        if self.REPORT_URL_TEMPLATE is None:
-            raise DukeCourseEvalScraperError(
-                "REPORT_URL_TEMPLATE not set. Please determine the correct URL pattern "
-                "by capturing a HAR file showing the View Report navigation."
-            )
-
         try:
             # Keep session alive
             self.keep_session_alive()
 
-            # Build report URL with data-id parameters
-            # TODO: Adjust this based on the actual URL pattern
+            # Build report URL with comma-separated data-id values
+            # URL format: Reports/StudentReport.aspx?id=id0,id1,id2,id3
             data_ids = eval_data.get('data_ids', {})
-            params = {
-                'id0': data_ids.get('data-id0', ''),
-                'id1': unquote(data_ids.get('data-id1', '')),
-                'id2': unquote(data_ids.get('data-id2', '')),
-                'id3': unquote(data_ids.get('data-id3', '')),
-            }
+            id_param = ','.join([
+                data_ids.get('data-id0', ''),
+                data_ids.get('data-id1', ''),
+                data_ids.get('data-id2', ''),
+                data_ids.get('data-id3', ''),
+            ])
 
-            report_url = f"{self.REPORT_URL_TEMPLATE}?{urlencode(params)}"
+            report_url = f"{self.REPORT_URL}?id={id_param}"
 
             if delay > 0:
                 time.sleep(delay)

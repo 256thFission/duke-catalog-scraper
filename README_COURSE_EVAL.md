@@ -49,25 +49,15 @@ COOKIES = {
 }
 ```
 
-## TODO: View Report URL Pattern
+## Features Overview
 
-**IMPORTANT**: Before downloading reports, you need to determine the View Report URL pattern.
-
-1. Click a "View Report" button on the evaluation search page
-2. Note the URL it navigates to (e.g., `https://eval-duke.evaluationkit.com/Report/Public/View?...`)
-3. Set `REPORT_URL_TEMPLATE` in `course_eval_scraper.py`:
-
-```python
-REPORT_URL_TEMPLATE = "https://eval-duke.evaluationkit.com/Report/Public/View"
-```
-
-**Alternative**: Capture a HAR file showing the View Report navigation and examine the request URL.
-
-Currently, the scraper can:
-- ✅ Search for evaluations
-- ✅ Extract metadata
-- ✅ Export to JSON/CSV
-- ⏳ Download reports (requires URL pattern)
+The scraper can:
+- ✅ Search for evaluations by department, course, instructor, term, and year
+- ✅ Extract comprehensive metadata from search results
+- ✅ Download evaluation report HTML files
+- ✅ Export metadata to JSON and CSV formats
+- ✅ Manage sessions with automatic keep-alive
+- ✅ Support all 160+ Duke departments
 
 ## Usage
 
@@ -97,8 +87,8 @@ results = scraper.search_evaluations(
 scraper.save_metadata_json("compsci_evals.json")
 scraper.save_metadata_csv("compsci_evals.csv")
 
-# Download reports (once URL pattern is set)
-# scraper.download_all_reports("output/reports", delay=0.5)
+# Download report HTML files
+scraper.download_all_reports("output/reports", delay=0.5)
 ```
 
 ### Scraping Multiple Departments
@@ -331,11 +321,12 @@ if not is_valid:
 - Sessions typically last ~1 hour
 - The scraper will warn you before expiry
 
-### View Report Download Fails
+### Report Download Fails
 
-- Ensure `REPORT_URL_TEMPLATE` is set correctly
-- Verify the data-id values are being extracted
+- Verify the data-id values are being extracted from search results
 - Check that cookies are still valid
+- Ensure you have access to the evaluation reports in your browser
+- Try downloading a single report manually first to verify access
 
 ## Security Notes
 
