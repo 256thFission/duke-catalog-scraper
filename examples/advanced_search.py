@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from duke_sso import DukeSSOAuth
-from course_scraper import DukeCourseScraper
+from duke_catalog_scraper.course_scraper import DukeCourseScraper
 import json
 from collections import defaultdict
 

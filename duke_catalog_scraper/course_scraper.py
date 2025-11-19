@@ -32,6 +32,11 @@ class DukeCourseScraper:
         "WEBLIB_HCX_CM.H_CLASS_SEARCH.FieldFormula.IScript_ClassSearch"
     )
 
+    CLASS_DETAILS_URL = (
+        "https://dukehub.duke.edu/psc/CSPRD01/EMPLOYEE/SA/s/"
+        "WEBLIB_HCX_CM.H_CLASS_SEARCH.FieldFormula.IScript_ClassDetails"
+    )
+
     def __init__(self, auth: DukeSSOAuth):
         """
         Initialize the course scraper.
@@ -41,6 +46,23 @@ class DukeCourseScraper:
         """
         self.auth = auth
         self.courses = []
+
+    def get_course_details(self, term: str, class_nbr: str, institution: str = "DUKEU") -> str:
+        params = {
+            "institution": institution,
+            "term": term,
+            "class_nbr": class_nbr,
+        }
+
+        try:
+            response = self.auth.get(self.CLASS_DETAILS_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+            description = data.get("section_info", {}).get("catalog_descr", {}).get("crse_catalog_description", "")
+            return description
+        except Exception as e:
+            print(f"Warning: Failed to fetch details for class {class_nbr}. Error: {e}")
+            return ""
 
     def search_courses(
         self,
@@ -142,6 +164,11 @@ class DukeCourseScraper:
                     break
 
                 print(f"Fetched page {page}/{total_pages or '?'} - {len(courses)} courses")
+                for course in courses:
+                    class_nbr = course.get("class_nbr")
+                    if class_nbr:
+                        long_desc = self.get_course_details(term, str(class_nbr), institution)
+                        course["catalog_description"] = long_desc
                 self.courses.extend(courses)
 
                 # Check if we should continue
@@ -205,7 +232,7 @@ class DukeCourseScraper:
         # Define base fields to export
         base_fields = [
             "class_nbr", "subject", "catalog_nbr", "class_section",
-            "descr", "topic", "units", "component", "class_type",
+            "descr", "catalog_description", "topic", "units", "component", "class_type",
             "acad_career_descr", "instruction_mode_descr",
             "campus_descr", "location_descr",
             "session_descr", "start_dt", "end_dt",
