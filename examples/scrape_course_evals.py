@@ -72,19 +72,6 @@ def main():
     print("Duke Course Evaluation Scraper")
     print("=" * 60)
 
-    # Check if REPORT_URL_TEMPLATE is set
-    if DukeCourseEvalScraper.REPORT_URL_TEMPLATE is None:
-        print("\nWARNING: REPORT_URL_TEMPLATE is not set!")
-        print("You need to determine the View Report URL pattern before downloading reports.")
-        print("\nTo find this:")
-        print("1. Click a 'View Report' button in your browser")
-        print("2. Note the URL it navigates to")
-        print("3. Set REPORT_URL_TEMPLATE in course_eval_scraper.py")
-        print("\nContinuing with search only (no report downloads)...\n")
-        download_reports = False
-    else:
-        download_reports = True
-
     # Initialize scraper with cookies
     scraper = DukeCourseEvalScraper(cookies=COOKIES)
 
@@ -147,15 +134,14 @@ def main():
                     str(dept_output_dir / f"{dept_code}_metadata.csv")
                 )
 
-                # Download reports if URL template is set
-                if download_reports:
-                    print(f"\nDownloading {len(results)} reports for {dept_code}...")
-                    html_output_dir = dept_output_dir / "reports"
-                    saved_files = scraper.download_all_reports(
-                        str(html_output_dir),
-                        delay=REQUEST_DELAY
-                    )
-                    print(f"Saved {len(saved_files)} reports to {html_output_dir}")
+                # Download report HTML files
+                print(f"\nDownloading {len(results)} reports for {dept_code}...")
+                html_output_dir = dept_output_dir / "reports"
+                saved_files = scraper.download_all_reports(
+                    str(html_output_dir),
+                    delay=REQUEST_DELAY
+                )
+                print(f"Saved {len(saved_files)} reports to {html_output_dir}")
 
                 # Clear evaluations list for next department
                 scraper.evaluations = []
@@ -171,9 +157,6 @@ def main():
     print(f"Total evaluations found: {total_evaluations}")
     print(f"Scraped {len(departments)} departments")
     print(f"Output directory: {OUTPUT_DIR.absolute()}")
-
-    if not download_reports:
-        print("\nNote: Reports were not downloaded because REPORT_URL_TEMPLATE is not set.")
 
 
 if __name__ == "__main__":
