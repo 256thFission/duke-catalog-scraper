@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 from duke_sso import DukeSSOAuth
-from course_eval_scraper import DukeCourseEvalScraper, DEPARTMENTS
+from course_eval_scraper import DukeCourseEvalScraper, DEPARTMENTS, complete_saml_flow
 
 # Load environment variables
 load_dotenv()
@@ -109,7 +109,24 @@ def main():
         print(f"ERROR: Failed to access evaluation site: {response.status_code}")
         return
 
-    print(f"✅ Successfully accessed evaluation site")
+    # Complete the SAML flow if needed
+    print("Completing SAML authentication flow...")
+    response = complete_saml_flow(auth.session, response)
+
+    # Check final response
+    if "SAML" in response.text:
+        print("ERROR: SAML flow did not complete successfully.")
+        print(f"Final response length: {len(response.text)} characters")
+        print(f"Final response URL: {response.url}")
+
+        # Save for debugging
+        with open("debug_final_response.html", "w", encoding="utf-8") as f:
+            f.write(response.text)
+        print("Saved response to: debug_final_response.html")
+        return
+    else:
+        print(f"✅ Successfully authenticated with evaluation site")
+        print(f"Final URL: {response.url}")
 
     # Initialize scraper with the authenticated session
     scraper = DukeCourseEvalScraper(session=auth.session)

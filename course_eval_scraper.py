@@ -8,12 +8,70 @@ import json
 import csv
 import time
 import re
+import html as html_lib
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 import requests
+
+
+def complete_saml_flow(session: requests.Session, initial_response: requests.Response, max_redirects: int = 10) -> requests.Response:
+    """
+    Automatically detect and submit SAML forms until reaching the final authenticated page.
+
+    Args:
+        session: The requests session to use
+        initial_response: The initial response (may be a SAML form or final page)
+        max_redirects: Maximum number of SAML form submissions to prevent infinite loops
+
+    Returns:
+        The final response after completing the SAML flow
+    """
+    response = initial_response
+
+    for i in range(max_redirects):
+        # Check if this is a SAML form
+        if "SAML" not in response.text:
+            # Not a SAML form, we're done
+            return response
+
+        # Parse the HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        form = soup.find('form')
+
+        if not form:
+            # No form found, we're done
+            return response
+
+        # Check if it has SAML fields
+        saml_response_input = form.find('input', {'name': 'SAMLResponse'})
+        if not saml_response_input:
+            # Not a SAML form
+            return response
+
+        # Extract form data
+        action = form.get('action', '')
+        if action:
+            # Decode HTML entities in the action URL
+            action = html_lib.unescape(action)
+
+        form_data = {}
+        for input_field in form.find_all('input'):
+            name = input_field.get('name')
+            value = input_field.get('value', '')
+            if name:
+                form_data[name] = value
+
+        print(f"  Submitting SAML form to: {action}")
+
+        # Submit the form
+        response = session.post(action, data=form_data, allow_redirects=True)
+
+    # If we get here, we hit the max redirects limit
+    print(f"Warning: Hit max SAML redirects ({max_redirects}), returning last response")
+    return response
 
 
 class DukeCourseEvalScraperError(Exception):
@@ -30,6 +88,7 @@ class DukeCourseEvalScraper:
     """
 
     SEARCH_URL = "https://eval-duke.evaluationkit.com/Report/Public/Results"
+    PAGINATION_API_URL = "https://eval-duke.evaluationkit.com/AppApi/Report/PublicReport"
     SESSION_STATUS_URL = "https://eval-duke.evaluationkit.com/api2/session/status"
     REPORT_URL = "https://eval-duke.evaluationkit.com/Reports/StudentReport.aspx"
     REPORT_LANDING_URL = "https://eval-duke.evaluationkit.com/Report/Public"
@@ -151,7 +210,12 @@ class DukeCourseEvalScraper:
 
             # Prime the session by visiting the reporting landing page
             # This initializes session state and refreshes cookies (YARP.Affinity, etc.)
-            self.session.get(self.REPORT_LANDING_URL)
+            print(f"  Priming session: {self.REPORT_LANDING_URL}")
+            priming_response = self.session.get(self.REPORT_LANDING_URL)
+
+            # Complete SAML flow if needed (shouldn't happen if already authenticated)
+            priming_response = complete_saml_flow(self.session, priming_response)
+            print(f"  Priming complete: {len(priming_response.text)} chars")
 
             # Make the request
             response = self.session.get(
@@ -161,11 +225,32 @@ class DukeCourseEvalScraper:
             )
             response.raise_for_status()
 
+            # Debug: Check what we got
+            print(f"  Search response: {len(response.text)} chars, URL: {response.url}")
+
+            # Check if we got redirected or got a SAML form
+            if "SAML" in response.text:
+                print("  WARNING: Search returned SAML form, attempting to complete SAML flow...")
+                response = complete_saml_flow(self.session, response)
+                print(f"  After SAML: {len(response.text)} chars, URL: {response.url}")
+
             # Parse HTML response
             soup = BeautifulSoup(response.text, 'html.parser')
 
+            # Debug: Check page title
+            title_elem = soup.find('title')
+            if title_elem:
+                print(f"  Page title: {title_elem.text.strip()}")
+
+            # Debug: Save response for inspection
+            debug_file = f"debug_search_response_area{area_id}.html"
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write(response.text)
+            print(f"  Saved search response to: {debug_file}")
+
             # Extract search results
-            search_results = soup.find_all('div', id=re.compile(r'^sr-\d+'))
+            # Results are <li> elements with class "sr-dataitem" and id pattern "sr-{numbers}_{numbers}_{numbers}_{numbers}"
+            search_results = soup.find_all('li', class_='sr-dataitem')
             print(f"Found {len(search_results)} evaluation results")
 
             for result in search_results:
@@ -173,12 +258,90 @@ class DukeCourseEvalScraper:
                 if eval_data:
                     results.append(eval_data)
 
+            # Fetch additional pages if there are more results (initial page has 20 results max)
+            print(f"  Initial page has {len(search_results)} results")
+            if len(search_results) >= 20:
+                print(f"  Fetching additional pages (initial page has 20+ results)...")
+                page = 2
+                while True:
+                    if delay > 0:
+                        time.sleep(delay)
+
+                    # Build pagination API request
+                    timestamp = int(time.time() * 1000)  # milliseconds
+                    pagination_params = {
+                        "Course": course,
+                        "Instructor": instructor,
+                        "TermId": term_id,
+                        "Year": year,
+                        "AreaId": area_id,
+                        "QuestionKey": question_key,
+                        "Search": "true",
+                        "page": page,
+                        "_": timestamp
+                    }
+
+                    # Request next page
+                    print(f"  Requesting page {page}...")
+                    api_response = self.session.get(
+                        self.PAGINATION_API_URL,
+                        params=pagination_params,
+                        headers={
+                            "Referer": full_url,
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Accept": "application/json, text/javascript, */*; q=0.01"
+                        }
+                    )
+                    api_response.raise_for_status()
+                    print(f"    Response status: {api_response.status_code}, length: {len(api_response.text)}")
+
+                    # Parse JSON response
+                    try:
+                        page_data = api_response.json()
+                        print(f"    JSON keys: {list(page_data.keys())}")
+                    except json.JSONDecodeError as e:
+                        print(f"  Page {page}: Invalid JSON response - {e}")
+                        print(f"    Response text preview: {api_response.text[:200]}")
+                        break
+
+                    # Check if there are more results using the hasMore flag
+                    has_more = page_data.get('hasMore', False)
+                    results_array = page_data.get('results', [])
+
+                    print(f"    hasMore: {has_more}, results array length: {len(results_array)}")
+
+                    if not results_array or not isinstance(results_array, list):
+                        # Empty or invalid response
+                        print(f"  Page {page}: No more results (empty or invalid response)")
+                        break
+
+                    # The results are an array of HTML strings, join them to parse
+                    page_html = ''.join(results_array)
+
+                    # Parse HTML from JSON response
+                    page_soup = BeautifulSoup(page_html, 'html.parser')
+                    page_results = page_soup.find_all('li', class_='sr-dataitem')
+
+                    if not page_results:
+                        print(f"  Page {page}: No more results (no results found in HTML)")
+                        break
+
+                    print(f"  Page {page}: Found {len(page_results)} results")
+
+                    for result in page_results:
+                        eval_data = self._parse_search_result(result)
+                        if eval_data:
+                            results.append(eval_data)
+
+                    page += 1
+
             if delay > 0:
                 time.sleep(delay)
 
         except requests.exceptions.RequestException as e:
             raise DukeCourseEvalScraperError(f"Search request failed: {e}")
 
+        print(f"Total results collected: {len(results)}")
         self.evaluations.extend(results)
         return results
 
@@ -193,16 +356,16 @@ class DukeCourseEvalScraper:
             Dictionary with evaluation metadata and data-id attributes
         """
         try:
-            # Extract course code
-            course_code_elem = result_div.find('span', class_='sr-dataitem-info-code')
+            # Extract course code (can be in <p> or <span>)
+            course_code_elem = result_div.find(class_='sr-dataitem-info-code')
             course_code = course_code_elem.text.strip() if course_code_elem else ""
 
             # Extract course title
             title_elem = result_div.find('h2')
             title = title_elem.text.strip() if title_elem else ""
 
-            # Extract instructor
-            instructor_elem = result_div.find('span', class_='sr-dataitem-info-instr')
+            # Extract instructor (can be in <p> or <span>)
+            instructor_elem = result_div.find(class_='sr-dataitem-info-instr')
             instructor = instructor_elem.text.strip() if instructor_elem else ""
 
             # Extract term and area
@@ -212,8 +375,8 @@ class DukeCourseEvalScraper:
             term = term_area_parts[0] if len(term_area_parts) > 0 else ""
             area = term_area_parts[1] if len(term_area_parts) > 1 else ""
 
-            # Extract response rate
-            response_elem = result_div.find('span', class_='sr-avg')
+            # Extract response rate (can be in various elements)
+            response_elem = result_div.find(class_='sr-avg')
             response_rate = response_elem.text.strip() if response_elem else ""
 
             # Extract UID from result div id
