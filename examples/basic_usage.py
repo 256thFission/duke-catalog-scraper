@@ -46,10 +46,14 @@ def main():
         password = os.getenv("DUKE_PASSWORD")
 
         if not username or not password:
-            print("Please set DUKE_NETID and DUKE_PASSWORD environment variables before running this example.")
+            print("\nPlease set DUKE_NETID and DUKE_PASSWORD in your .env file.")
+            print("Then run this script again, or run setup_auth.py first.")
             return
 
         duo_device_id = None  # Use default Duo device
+
+        print(f"\nLogging in as {username}...")
+        print("Check your phone for Duo push notification...")
 
         if not auth.login_with_credentials(username, password, duo_device_id):
             print("\nCredential-based login failed. Check your NetID/password and Duo approval.")

@@ -2,15 +2,13 @@
 Example script for scraping Duke course evaluations.
 
 This script demonstrates how to:
-1. Set up authentication with cookies
+1. Authenticate using Duke SSO (same as DukeHub)
 2. Search for evaluations by department
 3. Download evaluation report HTML files
 4. Export metadata to JSON and CSV
 
-Before running:
-1. Update the COOKIES dictionary with your current session cookies
-2. (Optional) Set the REPORT_URL_TEMPLATE after determining the correct URL pattern
-3. Configure which departments to scrape in the DEPARTMENTS_TO_SCRAPE list
+Configuration is read from .env file (see .env.example)
+Set DUKE_NETID and DUKE_PASSWORD in your .env file.
 """
 
 import os
@@ -20,36 +18,30 @@ from pathlib import Path
 # Add parent directory to path to import course_eval_scraper
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
+from duke_sso import DukeSSOAuth
 from course_eval_scraper import DukeCourseEvalScraper, DEPARTMENTS
+
+# Load environment variables
+load_dotenv()
 
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-# Authentication cookies
-# Replace these with your current cookies from eval-duke.evaluationkit.com
-COOKIES = {
-    '.ASPXAUTH': 'YOUR_ASPXAUTH_COOKIE_HERE',
-    'ASP.NET_SessionId': 'YOUR_SESSION_ID_HERE',
-    'AWSALBCORS': 'YOUR_AWSALBCORS_COOKIE_HERE',
-    'CESJWT': 'YOUR_CESJWT_COOKIE_HERE',
-    'YARP.Affinity': 'YOUR_YARP_AFFINITY_COOKIE_HERE',
-    'LoggedinFrom': 'Shibboleth',
-}
-
 # Output directory for HTML reports and metadata
-OUTPUT_DIR = Path("data/course_evaluations")
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "data")) / "course_evaluations"
 
 # Delay between requests (seconds) to avoid overwhelming the server
-REQUEST_DELAY = 0.5
+REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0.5"))
 
 # Departments to scrape (use department codes from DEPARTMENTS dict)
 # Set to None to scrape all departments
 DEPARTMENTS_TO_SCRAPE = [
     "COMPSCI",  # Computer Science
-    "MATH",     # Mathematics
-    "HISTORY",  # History
+    # "MATH",     # Mathematics
+    # "HISTORY",  # History
     # Add more as needed...
 ]
 
@@ -60,7 +52,7 @@ SEARCH_YEAR = ""     # e.g., "2023"
 
 # Generic search term to use for each department
 # This should return all courses in that department
-COURSE_SEARCH_TERM = "a"  # Common letter that appears in most course codes
+COURSE_SEARCH_TERM = "COMPSCI"  # Common letter that appears in most course codes
 
 
 # ============================================================================
@@ -72,17 +64,64 @@ def main():
     print("Duke Course Evaluation Scraper")
     print("=" * 60)
 
-    # Initialize scraper with cookies
-    scraper = DukeCourseEvalScraper(cookies=COOKIES)
+    # Load configuration
+    session_file = os.getenv("SESSION_FILE", "duke_session.pkl")
 
-    # Check session validity
-    print("\nChecking session validity...")
-    if not scraper.check_session():
-        print("ERROR: Session is invalid or expired.")
-        print("Please update your cookies and try again.")
+    # Initialize Duke SSO authentication
+    auth = DukeSSOAuth(cookie_file=session_file)
+
+    # First try to use a cached session from session_file
+    if auth.login():
+        print("\nUsing cached Duke SSO session.")
+    else:
+        print("\nNo cached session found or session expired.")
+        # Fall back to credential-based login with Duo push
+        username = os.getenv("DUKE_NETID")
+        password = os.getenv("DUKE_PASSWORD")
+
+        if not username or not password:
+            print("\nPlease set DUKE_NETID and DUKE_PASSWORD in your .env file.")
+            print("Example:")
+            print("  DUKE_NETID=abc123")
+            print("  DUKE_PASSWORD=your_password")
+            return
+
+        duo_device_id = None  # Use default Duo device
+
+        print(f"\nLogging in as {username}...")
+        print("Check your phone for Duo push notification...")
+
+        if not auth.login_with_credentials(username, password, duo_device_id):
+            print("\nCredential-based login failed.")
+            print("Check your NetID/password and approve the Duo push.")
+            return
+
+        # Cache the authenticated session for future runs
+        auth.save_session()
+        print("\nAuthentication successful and session cached.")
+
+    # Now access the evaluation site to establish session
+    print("\nAccessing course evaluation site...")
+    eval_url = "https://eval-duke.evaluationkit.com/"
+    response = auth.get(eval_url)
+
+    if response.status_code != 200:
+        print(f"ERROR: Failed to access evaluation site: {response.status_code}")
         return
 
-    print("Session is valid!\n")
+    print(f"✅ Successfully accessed evaluation site")
+
+    # Initialize scraper with the authenticated session
+    scraper = DukeCourseEvalScraper(session=auth.session)
+
+    # Check session validity
+    print("\nVerifying evaluation site session...")
+    if not scraper.check_session():
+        print("ERROR: Session is invalid.")
+        print("This shouldn't happen. Please report this issue.")
+        return
+
+    print("✅ Session is valid!\n")
 
     # Determine which departments to scrape
     if DEPARTMENTS_TO_SCRAPE is None:
