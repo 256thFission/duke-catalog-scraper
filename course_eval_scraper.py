@@ -14,7 +14,6 @@ from pathlib import Path
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 import requests
-import html
 
 
 class DukeCourseEvalScraperError(Exception):
@@ -33,6 +32,7 @@ class DukeCourseEvalScraper:
     SEARCH_URL = "https://eval-duke.evaluationkit.com/Report/Public/Results"
     SESSION_STATUS_URL = "https://eval-duke.evaluationkit.com/api2/session/status"
     REPORT_URL = "https://eval-duke.evaluationkit.com/Reports/StudentReport.aspx"
+    REPORT_LANDING_URL = "https://eval-duke.evaluationkit.com/Report/Public"
 
     def __init__(self, cookies: Optional[Dict[str, str]] = None, session: Optional[requests.Session] = None):
         """
@@ -100,60 +100,6 @@ class DukeCourseEvalScraper:
             self.check_session()
             self.last_session_check = now
 
-    def _handle_saml_form(self, response: requests.Response, max_redirects: int = 5) -> requests.Response:
-        """
-        Detect and submit SAML forms to complete SSO authentication.
-
-        Args:
-            response: The response that might contain a SAML form
-            max_redirects: Maximum number of SAML form submissions to follow
-
-        Returns:
-            The final response after all SAML forms are submitted
-        """
-        redirects = 0
-        current_response = response
-
-        while redirects < max_redirects:
-            soup = BeautifulSoup(current_response.text, 'html.parser')
-
-            # Look for SAML form (contains SAMLResponse or SAMLRequest)
-            form = soup.find('form')
-            if not form:
-                break
-
-            # Check if this is a SAML form
-            saml_response = soup.find('input', {'name': 'SAMLResponse'})
-            saml_request = soup.find('input', {'name': 'SAMLRequest'})
-
-            if not saml_response and not saml_request:
-                break
-
-            # Extract form data
-            action = form.get('action', '')
-            if action:
-                # Decode HTML entities in action URL
-                action = html.unescape(action)
-
-            # Extract all hidden inputs
-            form_data = {}
-            for input_tag in form.find_all('input'):
-                name = input_tag.get('name')
-                value = input_tag.get('value', '')
-                if name:
-                    form_data[name] = value
-
-            print(f"Submitting SAML form to: {action}")
-
-            # Submit the form
-            current_response = self.session.post(action, data=form_data, allow_redirects=True)
-            redirects += 1
-
-        if redirects > 0:
-            print(f"Completed {redirects} SAML form submission(s)")
-
-        return current_response
-
     def search_evaluations(
         self,
         area_id: str,
@@ -203,35 +149,24 @@ class DukeCourseEvalScraper:
             print(f"Searching evaluations for AreaId={area_id}, Course={course}...")
             print(f"Search URL: {full_url}")
 
+            # Prime the session by visiting the reporting landing page
+            # This initializes session state and refreshes cookies (YARP.Affinity, etc.)
+            self.session.get(self.REPORT_LANDING_URL)
+
             # Make the request
-            response = self.session.get(self.SEARCH_URL, params=params)
+            response = self.session.get(
+                self.SEARCH_URL,
+                params=params,
+                headers={"Referer": self.REPORT_LANDING_URL}
+            )
             response.raise_for_status()
-
-            # Handle any SAML forms (SSO redirects)
-            response = self._handle_saml_form(response)
-
-            # Log response details
-            print(f"Response status: {response.status_code}")
-            print(f"Response length: {len(response.text)} characters")
-
-            # Save response HTML for debugging
-            debug_file = f"debug_response_area{area_id}.html"
-            with open(debug_file, 'w', encoding='utf-8') as f:
-                f.write(response.text)
-            print(f"Saved response to: {debug_file}")
 
             # Parse HTML response
             soup = BeautifulSoup(response.text, 'html.parser')
 
             # Extract search results
             search_results = soup.find_all('div', id=re.compile(r'^sr-\d+'))
-            print(f"Found {len(search_results)} evaluation results with pattern ^sr-\\d+")
-
-            # Also check for any divs that might contain results
-            all_divs_with_id = soup.find_all('div', id=True)
-            print(f"Total divs with id attribute: {len(all_divs_with_id)}")
-            if all_divs_with_id:
-                print(f"Sample div IDs: {[div.get('id') for div in all_divs_with_id[:10]]}")
+            print(f"Found {len(search_results)} evaluation results")
 
             for result in search_results:
                 eval_data = self._parse_search_result(result)
