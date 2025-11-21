@@ -353,94 +353,66 @@ def main():
         print(f"      └── ...")
         sys.exit(1)
 
-    # Group by department for reporting
-    dept_counts = {}
+    # Group files by department
+    dept_files = {}
     for html_file in html_files:
         # Get department name from path (parent of parent of file)
         dept = html_file.parent.parent.name
-        dept_counts[dept] = dept_counts.get(dept, 0) + 1
+        if dept not in dept_files:
+            dept_files[dept] = []
+        dept_files[dept].append(html_file)
 
-    print(f"Found {len(html_files)} HTML files across {len(dept_counts)} departments:")
-    for dept, count in sorted(dept_counts.items()):
-        print(f"  • {dept}: {count} courses")
+    print(f"Found {len(html_files)} HTML files across {len(dept_files)} departments:")
+    for dept, files in sorted(dept_files.items()):
+        print(f"  • {dept}: {len(files)} courses")
     print()
 
-    # Parse all files and group by department
-    # Structure: dept_name -> { 'path': Path, 'response_rows': [], 'question_rows': [], 'free_text_rows': [] }
-    dept_data = {}
-    
-    parse_errors = []
+    # Process each department separately
     total_success = 0
+    total_errors = 0
 
-    current_dept = None
-    for i, html_file in enumerate(html_files, 1):
-        try:
-            # Show department header when we switch departments
-            dept_name = html_file.parent.parent.name
-            dept_path = html_file.parent.parent
-            
-            if dept_name != current_dept:
-                current_dept = dept_name
-                print(f"\n{'='*70}")
-                print(f"Processing {dept_name}")
-                print(f"{'='*70}")
-                
-            if dept_name not in dept_data:
-                dept_data[dept_name] = {
-                    'path': dept_path,
-                    'response_rows': [],
-                    'question_rows': [],
-                    'free_text_rows': []
-                }
+    for dept_name, dept_html_files in sorted(dept_files.items()):
+        print(f"\n{'='*70}")
+        print(f"Processing {dept_name} ({len(dept_html_files)} courses)")
+        print(f"{'='*70}")
 
-            print(f"[{i}/{len(html_files)}] {html_file.name}")
-            parser = CourseEvaluationParser(str(html_file))
+        dept_response_rows = []
+        dept_question_rows = []
+        dept_free_text_rows = []
+        dept_errors = []
 
-            # Collect rows
-            response_rows = parser.get_response_rows()
-            question_rows = parser.get_question_rows()
-            free_text_rows = parser.get_free_text_rows()
+        # Parse all files in this department
+        for i, html_file in enumerate(dept_html_files, 1):
+            try:
+                print(f"[{i}/{len(dept_html_files)}] {html_file.name}")
+                parser = CourseEvaluationParser(str(html_file))
 
-            dept_data[dept_name]['response_rows'].extend(response_rows)
-            dept_data[dept_name]['question_rows'].extend(question_rows)
-            dept_data[dept_name]['free_text_rows'].extend(free_text_rows)
-            
-            total_success += 1
+                # Collect rows
+                response_rows = parser.get_response_rows()
+                question_rows = parser.get_question_rows()
+                free_text_rows = parser.get_free_text_rows()
 
-            # Show concise summary
-            course_short = parser.course_info['course'].split(':')[0] if ':' in parser.course_info['course'] else parser.course_info['course']
-            instructor_short = parser.course_info['instructor'].split(',')[0] if ',' in parser.course_info['instructor'] else parser.course_info['instructor']
-            print(f"  ✓ {course_short} - {instructor_short} ({len(parser.questions)} Qs, {len(free_text_rows)} comments)")
+                dept_response_rows.extend(response_rows)
+                dept_question_rows.extend(question_rows)
+                dept_free_text_rows.extend(free_text_rows)
 
-        except Exception as e:
-            error_msg = f"{html_file.name}: {str(e)}"
-            parse_errors.append(error_msg)
-            print(f"  ✗ Error: {str(e)}")
+                # Show concise summary
+                course_short = parser.course_info['course'].split(':')[0] if ':' in parser.course_info['course'] else parser.course_info['course']
+                instructor_short = parser.course_info['instructor'].split(',')[0] if ',' in parser.course_info['instructor'] else parser.course_info['instructor']
+                print(f"  ✓ {course_short} - {instructor_short} ({len(parser.questions)} Qs, {len(free_text_rows)} comments)")
 
-    print(f"\n{'='*70}")
-    print(f"Parsing complete:")
-    print(f"  Successful: {total_success}/{len(html_files)}")
-    print(f"  Failed: {len(parse_errors)}")
+            except Exception as e:
+                error_msg = f"{html_file.name}: {str(e)}"
+                dept_errors.append(error_msg)
+                print(f"  ✗ Error: {str(e)}")
 
-    if parse_errors:
-        print(f"\nErrors encountered:")
-        for error in parse_errors[:10]:  # Show first 10 errors
-            print(f"  - {error}")
-        if len(parse_errors) > 10:
-            print(f"  ... and {len(parse_errors) - 10} more")
+        # Write CSV files for this department
+        dept_dir = html_file.parent.parent  # Get department directory
 
-    # Write CSV files per department
-    print(f"\n{'='*70}")
-    print("Writing CSV files per department...")
+        print(f"\nWriting CSV files to {dept_dir}/...")
 
-    files_written = 0
-    
-    for dept_name, data in sorted(dept_data.items()):
-        dept_path = data['path']
-        print(f"\nWriting files for {dept_name} in {dept_path}...")
-        
         # Response-level CSV
-        responses_csv = dept_path / 'evaluations_responses.csv'
+        responses_csv = dept_dir / 'evaluations_responses.csv'
         with open(responses_csv, 'w', newline='', encoding='utf-8') as f:
             fieldnames = [
                 'filename', 'semester', 'course', 'instructor',
@@ -450,11 +422,12 @@ def main():
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(data['response_rows'])
-        print(f"  ✓ {responses_csv.name} ({len(data['response_rows'])} rows)")
+            writer.writerows(dept_response_rows)
+
+        print(f"  ✓ evaluations_responses.csv ({len(dept_response_rows)} rows)")
 
         # Question-level CSV
-        questions_csv = dept_path / 'evaluations_questions.csv'
+        questions_csv = dept_dir / 'evaluations_questions.csv'
         with open(questions_csv, 'w', newline='', encoding='utf-8') as f:
             fieldnames = [
                 'filename', 'semester', 'course', 'instructor',
@@ -464,11 +437,12 @@ def main():
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(data['question_rows'])
-        print(f"  ✓ {questions_csv.name} ({len(data['question_rows'])} rows)")
+            writer.writerows(dept_question_rows)
+
+        print(f"  ✓ evaluations_questions.csv ({len(dept_question_rows)} rows)")
 
         # Free text CSV
-        free_text_csv = dept_path / 'evaluations_free_text.csv'
+        free_text_csv = dept_dir / 'evaluations_free_text.csv'
         with open(free_text_csv, 'w', newline='', encoding='utf-8') as f:
             fieldnames = [
                 'filename', 'semester', 'course', 'instructor',
@@ -476,19 +450,32 @@ def main():
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(data['free_text_rows'])
-        print(f"  ✓ {free_text_csv.name} ({len(data['free_text_rows'])} rows)")
-        
-        files_written += 3
+            writer.writerows(dept_free_text_rows)
+
+        print(f"  ✓ evaluations_free_text.csv ({len(dept_free_text_rows)} rows)")
+
+        # Update totals
+        total_success += len(dept_html_files) - len(dept_errors)
+        total_errors += len(dept_errors)
+
+        if dept_errors:
+            print(f"\n  Errors in {dept_name}:")
+            for error in dept_errors[:5]:
+                print(f"    - {error}")
+            if len(dept_errors) > 5:
+                print(f"    ... and {len(dept_errors) - 5} more")
 
     print(f"\n{'='*70}")
-    print("Done! CSV files generated successfully.")
+    print("Done! All departments processed.")
     print(f"\nSummary:")
-    print(f"  Total departments processed: {len(dept_data)}")
-    print(f"  Total files written: {files_written}")
-    print(f"  Total response rows: {sum(len(d['response_rows']) for d in dept_data.values())}")
-    print(f"  Total question rows: {sum(len(d['question_rows']) for d in dept_data.values())}")
-    print(f"  Total free text responses: {sum(len(d['free_text_rows']) for d in dept_data.values())}")
+    print(f"  Departments processed: {len(dept_files)}")
+    print(f"  Total courses parsed: {total_success}/{len(html_files)}")
+    print(f"  Total errors: {total_errors}")
+    print(f"\nCSV files have been written to each department folder:")
+    for dept_name in sorted(dept_files.keys()):
+        dept_path = target_dir / 'course_evaluations' / dept_name
+        if dept_path.exists():
+            print(f"  • {dept_path}/")
 
 
 if __name__ == '__main__':
