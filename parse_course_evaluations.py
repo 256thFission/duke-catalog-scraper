@@ -12,6 +12,34 @@ from bs4 import BeautifulSoup
 from typing import Dict, List, Optional
 
 
+# Junk text to filter out from free text responses
+JUNK_PATTERNS = [
+    'sitemap', 'terms & conditions', 'privacy policy', 'accessibility policy',
+    'terms of use', 'cookie policy', 'copyright', 'all rights reserved',
+    'write-in responses:', 'response option', 'weight', 'frequency', 'percentage'
+]
+
+
+def is_junk_text(text: str) -> bool:
+    """Check if text is likely junk (footer links, navigation, etc)."""
+    text_lower = text.lower().strip()
+
+    # Too short
+    if len(text_lower) < 10:
+        return True
+
+    # Matches junk patterns
+    for pattern in JUNK_PATTERNS:
+        if pattern in text_lower:
+            return True
+
+    # Only contains common navigation words
+    if text_lower in ['home', 'about', 'contact', 'help', 'login', 'logout']:
+        return True
+
+    return False
+
+
 class CourseEvaluationParser:
     """Parser for Duke Course Evaluation HTML files."""
 
@@ -106,14 +134,15 @@ class CourseEvaluationParser:
                 elif elem.name == 'li':
                     # Free text responses are in list items
                     li_text = elem.get_text(strip=True)
-                    if li_text and len(li_text) > 5:
+                    # Filter out junk and check minimum length
+                    if li_text and len(li_text) >= 10 and not is_junk_text(li_text):
                         question_data['free_text'].append(li_text)
 
                 elif elem.name == 'p':
                     # Check if it's a free text response
                     p_text = elem.get_text(strip=True)
-                    if p_text and len(p_text) > 10:
-                        # This might be a free text response
+                    # Filter out junk
+                    if p_text and len(p_text) >= 15 and not is_junk_text(p_text):
                         question_data['free_text'].append(p_text)
 
             questions.append(question_data)
@@ -165,155 +194,187 @@ class CourseEvaluationParser:
                         'percentage': cell_texts[2] if len(cell_texts) > 2 else ''
                     })
 
-    def to_csv_responses(self, output_path: str):
-        """
-        Export to CSV format with one row per response option.
-        Best for quantitative analysis of rating distributions.
-        """
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = [
-                'filename', 'semester', 'course', 'instructor',
-                'question_number', 'question_text',
-                'response_option', 'weight', 'frequency', 'percentage',
-                'response_rate', 'mean', 'std', 'median'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
+    def get_response_rows(self) -> List[Dict]:
+        """Get all response-level rows for this course."""
+        rows = []
+        for question in self.questions:
+            base_row = {
+                'filename': self.course_info['filename'],
+                'semester': self.course_info['semester'],
+                'course': self.course_info['course'],
+                'instructor': self.course_info['instructor'],
+                'question_number': question['number'],
+                'question_text': question['text'],
+                'response_rate': question['statistics'].get('Response Rate', ''),
+                'mean': question['statistics'].get('Mean', ''),
+                'std': question['statistics'].get('STD', ''),
+                'median': question['statistics'].get('Median', '')
+            }
 
-            for question in self.questions:
-                base_row = {
-                    'filename': self.course_info['filename'],
-                    'semester': self.course_info['semester'],
-                    'course': self.course_info['course'],
-                    'instructor': self.course_info['instructor'],
-                    'question_number': question['number'],
-                    'question_text': question['text'],
-                    'response_rate': question['statistics'].get('Response Rate', ''),
-                    'mean': question['statistics'].get('Mean', ''),
-                    'std': question['statistics'].get('STD', ''),
-                    'median': question['statistics'].get('Median', '')
-                }
+            if question['responses']:
+                # One row per response option
+                for response in question['responses']:
+                    row = base_row.copy()
+                    row['response_option'] = response.get('option', '')
+                    row['weight'] = response.get('weight', '')
+                    row['frequency'] = response.get('frequency', '')
+                    row['percentage'] = response.get('percentage', '')
+                    rows.append(row)
+            else:
+                # One row even if no responses (for free text questions)
+                rows.append(base_row)
 
-                if question['responses']:
-                    # Write one row per response option
-                    for response in question['responses']:
-                        row = base_row.copy()
-                        row['response_option'] = response.get('option', '')
-                        row['weight'] = response.get('weight', '')
-                        row['frequency'] = response.get('frequency', '')
-                        row['percentage'] = response.get('percentage', '')
-                        writer.writerow(row)
-                else:
-                    # Write one row even if no responses (for free text questions)
-                    writer.writerow(base_row)
+        return rows
 
-    def to_csv_questions(self, output_path: str):
-        """
-        Export to CSV format with one row per question.
-        Best for overview and comparison of questions.
-        """
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = [
-                'filename', 'semester', 'course', 'instructor',
-                'question_number', 'question_text',
-                'response_rate', 'mean', 'std', 'median',
-                'total_responses', 'response_distribution'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
+    def get_question_rows(self) -> List[Dict]:
+        """Get all question-level rows for this course."""
+        rows = []
+        for question in self.questions:
+            # Create response distribution string
+            response_dist = '; '.join([
+                f"{r.get('option', '')}: {r.get('frequency', '')} ({r.get('percentage', '')})"
+                for r in question['responses']
+            ])
 
-            for question in self.questions:
-                # Create response distribution string
-                response_dist = '; '.join([
-                    f"{r.get('option', '')}: {r.get('frequency', '')} ({r.get('percentage', '')})"
-                    for r in question['responses']
-                ])
+            # Calculate total responses
+            total = sum([
+                int(r.get('frequency', '0'))
+                for r in question['responses']
+                if r.get('frequency', '').isdigit()
+            ])
 
-                # Calculate total responses
-                total = sum([
-                    int(r.get('frequency', '0'))
-                    for r in question['responses']
-                    if r.get('frequency', '').isdigit()
-                ])
+            row = {
+                'filename': self.course_info['filename'],
+                'semester': self.course_info['semester'],
+                'course': self.course_info['course'],
+                'instructor': self.course_info['instructor'],
+                'question_number': question['number'],
+                'question_text': question['text'],
+                'response_rate': question['statistics'].get('Response Rate', ''),
+                'mean': question['statistics'].get('Mean', ''),
+                'std': question['statistics'].get('STD', ''),
+                'median': question['statistics'].get('Median', ''),
+                'total_responses': str(total) if total > 0 else '',
+                'response_distribution': response_dist
+            }
+            rows.append(row)
 
-                row = {
-                    'filename': self.course_info['filename'],
-                    'semester': self.course_info['semester'],
-                    'course': self.course_info['course'],
-                    'instructor': self.course_info['instructor'],
-                    'question_number': question['number'],
-                    'question_text': question['text'],
-                    'response_rate': question['statistics'].get('Response Rate', ''),
-                    'mean': question['statistics'].get('Mean', ''),
-                    'std': question['statistics'].get('STD', ''),
-                    'median': question['statistics'].get('Median', ''),
-                    'total_responses': str(total) if total > 0 else '',
-                    'response_distribution': response_dist
-                }
-                writer.writerow(row)
+        return rows
 
-    def to_csv_free_text(self, output_path: str):
-        """
-        Export free text responses to CSV.
-        Best for qualitative analysis.
-        """
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = [
-                'filename', 'semester', 'course', 'instructor',
-                'question_number', 'question_text', 'response_text'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
+    def get_free_text_rows(self) -> List[Dict]:
+        """Get all free text response rows for this course."""
+        rows = []
+        for question in self.questions:
+            if question['free_text']:
+                for response_text in question['free_text']:
+                    row = {
+                        'filename': self.course_info['filename'],
+                        'semester': self.course_info['semester'],
+                        'course': self.course_info['course'],
+                        'instructor': self.course_info['instructor'],
+                        'question_number': question['number'],
+                        'question_text': question['text'],
+                        'response_text': response_text
+                    }
+                    rows.append(row)
 
-            for question in self.questions:
-                if question['free_text']:
-                    for response_text in question['free_text']:
-                        row = {
-                            'filename': self.course_info['filename'],
-                            'semester': self.course_info['semester'],
-                            'course': self.course_info['course'],
-                            'instructor': self.course_info['instructor'],
-                            'question_number': question['number'],
-                            'question_text': question['text'],
-                            'response_text': response_text
-                        }
-                        writer.writerow(row)
+        return rows
+
+
+def find_html_files(base_dir: Path) -> List[Path]:
+    """
+    Find all course evaluation HTML files in the directory structure.
+    Expected structure: data/course_evaluations/DEPARTMENT/reports/*.html
+    """
+    html_files = []
+
+    # Look for the pattern: base_dir/**/reports/*.html
+    reports_dirs = base_dir.glob('**/reports')
+
+    for reports_dir in reports_dirs:
+        for html_file in reports_dir.glob('*.html'):
+            html_files.append(html_file)
+
+    return sorted(html_files)
 
 
 def main():
     """Main function to parse evaluation files."""
     if len(sys.argv) < 2:
-        print("Usage: python parse_course_evaluations.py <html_file1> [html_file2] ...")
+        print("Usage: python parse_course_evaluations.py <directory>")
         print("\nExample:")
-        print("  python parse_course_evaluations.py COMPSCI-512-01_Maggs__Bruce_Fall_2024.html")
-        print("\nThis will generate three CSV files:")
-        print("  - evaluations_responses.csv (detailed response-level data)")
-        print("  - evaluations_questions.csv (summary question-level data)")
-        print("  - evaluations_free_text.csv (free text responses)")
+        print("  python parse_course_evaluations.py data")
+        print("\nThis will:")
+        print("  - Recursively find all HTML files in data/**/reports/*.html")
+        print("  - Parse all course evaluations")
+        print("  - Generate three combined CSV files:")
+        print("    • evaluations_responses.csv (detailed response-level data)")
+        print("    • evaluations_questions.csv (summary question-level data)")
+        print("    • evaluations_free_text.csv (free text responses)")
         sys.exit(1)
 
-    html_files = sys.argv[1:]
+    target_dir = Path(sys.argv[1])
 
-    # Parse all files and combine results
-    all_parsers = []
-    for html_file in html_files:
-        if not Path(html_file).exists():
-            print(f"Warning: File not found: {html_file}")
-            continue
-
-        print(f"Parsing: {html_file}")
-        parser = CourseEvaluationParser(html_file)
-        all_parsers.append(parser)
-        print(f"  Course: {parser.course_info['course']}")
-        print(f"  Instructor: {parser.course_info['instructor']}")
-        print(f"  Questions: {len(parser.questions)}")
-
-    if not all_parsers:
-        print("Error: No valid files to parse")
+    if not target_dir.exists():
+        print(f"Error: Directory not found: {target_dir}")
         sys.exit(1)
 
-    # Generate combined CSV files
-    print("\nGenerating CSV files...")
+    if not target_dir.is_dir():
+        print(f"Error: Not a directory: {target_dir}")
+        sys.exit(1)
+
+    # Find all HTML files
+    print(f"Searching for HTML files in {target_dir}...")
+    html_files = find_html_files(target_dir)
+
+    if not html_files:
+        print(f"Error: No HTML files found in {target_dir}/**/reports/*.html")
+        sys.exit(1)
+
+    print(f"Found {len(html_files)} HTML files\n")
+
+    # Parse all files
+    all_response_rows = []
+    all_question_rows = []
+    all_free_text_rows = []
+
+    parse_errors = []
+
+    for i, html_file in enumerate(html_files, 1):
+        try:
+            print(f"[{i}/{len(html_files)}] Parsing: {html_file.name}")
+            parser = CourseEvaluationParser(str(html_file))
+
+            # Collect rows
+            all_response_rows.extend(parser.get_response_rows())
+            all_question_rows.extend(parser.get_question_rows())
+            all_free_text_rows.extend(parser.get_free_text_rows())
+
+            print(f"  ✓ Course: {parser.course_info['course']}")
+            print(f"    Instructor: {parser.course_info['instructor']}")
+            print(f"    Questions: {len(parser.questions)}")
+            print(f"    Free text responses: {len(parser.get_free_text_rows())}")
+
+        except Exception as e:
+            error_msg = f"{html_file.name}: {str(e)}"
+            parse_errors.append(error_msg)
+            print(f"  ✗ Error: {str(e)}")
+
+    print(f"\n{'='*70}")
+    print(f"Parsing complete:")
+    print(f"  Successful: {len(html_files) - len(parse_errors)}/{len(html_files)}")
+    print(f"  Failed: {len(parse_errors)}")
+
+    if parse_errors:
+        print(f"\nErrors encountered:")
+        for error in parse_errors[:10]:  # Show first 10 errors
+            print(f"  - {error}")
+        if len(parse_errors) > 10:
+            print(f"  ... and {len(parse_errors) - 10} more")
+
+    # Write combined CSV files
+    print(f"\n{'='*70}")
+    print("Writing CSV files...")
 
     # Response-level CSV
     responses_csv = 'evaluations_responses.csv'
@@ -326,11 +387,9 @@ def main():
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerows(all_response_rows)
 
-    for parser in all_parsers:
-        parser.to_csv_responses(responses_csv)
-
-    print(f"  ✓ {responses_csv}")
+    print(f"  ✓ {responses_csv} ({len(all_response_rows)} rows)")
 
     # Question-level CSV
     questions_csv = 'evaluations_questions.csv'
@@ -343,11 +402,9 @@ def main():
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerows(all_question_rows)
 
-    for parser in all_parsers:
-        parser.to_csv_questions(questions_csv)
-
-    print(f"  ✓ {questions_csv}")
+    print(f"  ✓ {questions_csv} ({len(all_question_rows)} rows)")
 
     # Free text CSV
     free_text_csv = 'evaluations_free_text.csv'
@@ -358,13 +415,17 @@ def main():
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerows(all_free_text_rows)
 
-    for parser in all_parsers:
-        parser.to_csv_free_text(free_text_csv)
+    print(f"  ✓ {free_text_csv} ({len(all_free_text_rows)} rows)")
 
-    print(f"  ✓ {free_text_csv}")
-
-    print("\nDone! CSV files generated successfully.")
+    print(f"\n{'='*70}")
+    print("Done! CSV files generated successfully.")
+    print(f"\nSummary:")
+    print(f"  Total courses parsed: {len(html_files) - len(parse_errors)}")
+    print(f"  Total response rows: {len(all_response_rows)}")
+    print(f"  Total question rows: {len(all_question_rows)}")
+    print(f"  Total free text responses: {len(all_free_text_rows)}")
 
 
 if __name__ == '__main__':
