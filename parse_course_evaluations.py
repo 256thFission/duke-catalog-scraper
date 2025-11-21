@@ -300,20 +300,29 @@ def find_html_files(base_dir: Path) -> List[Path]:
 
 def main():
     """Main function to parse evaluation files."""
+    # Default to 'data' directory if not specified
     if len(sys.argv) < 2:
-        print("Usage: python parse_course_evaluations.py <directory>")
-        print("\nExample:")
-        print("  python parse_course_evaluations.py data")
-        print("\nThis will:")
-        print("  - Recursively find all HTML files in data/**/reports/*.html")
-        print("  - Parse all course evaluations")
-        print("  - Generate three combined CSV files:")
-        print("    • evaluations_responses.csv (detailed response-level data)")
-        print("    • evaluations_questions.csv (summary question-level data)")
-        print("    • evaluations_free_text.csv (free text responses)")
-        sys.exit(1)
-
-    target_dir = Path(sys.argv[1])
+        # Try to use 'data' directory by default
+        if Path('data').exists() and Path('data').is_dir():
+            target_dir = Path('data')
+            print("No directory specified, using default: data/")
+        else:
+            print("Usage: python parse_course_evaluations.py [directory]")
+            print("\nExample:")
+            print("  python parse_course_evaluations.py data")
+            print("  python parse_course_evaluations.py      # defaults to 'data' if it exists")
+            print("\nExpected structure:")
+            print("  data/course_evaluations/DEPARTMENT/reports/*.html")
+            print("\nThis will:")
+            print("  - Recursively find all HTML files in <dir>/**/reports/*.html")
+            print("  - Parse all course evaluations from all departments")
+            print("  - Generate three combined CSV files:")
+            print("    • evaluations_responses.csv (detailed response-level data)")
+            print("    • evaluations_questions.csv (summary question-level data)")
+            print("    • evaluations_free_text.csv (free text responses)")
+            sys.exit(1)
+    else:
+        target_dir = Path(sys.argv[1])
 
     if not target_dir.exists():
         print(f"Error: Directory not found: {target_dir}")
@@ -325,13 +334,36 @@ def main():
 
     # Find all HTML files
     print(f"Searching for HTML files in {target_dir}...")
+    print(f"Looking for pattern: {target_dir}/**/reports/*.html\n")
     html_files = find_html_files(target_dir)
 
     if not html_files:
-        print(f"Error: No HTML files found in {target_dir}/**/reports/*.html")
+        print(f"Error: No HTML files found!")
+        print(f"\nSearched for: {target_dir}/**/reports/*.html")
+        print(f"\nPlease ensure your data follows this structure:")
+        print(f"  {target_dir}/")
+        print(f"  └── course_evaluations/")
+        print(f"      ├── COMPSCI/")
+        print(f"      │   └── reports/")
+        print(f"      │       ├── COMPSCI-512-01_Maggs_Bruce_Fall_2024.html")
+        print(f"      │       └── ...")
+        print(f"      ├── MATH/")
+        print(f"      │   └── reports/")
+        print(f"      │       └── ...")
+        print(f"      └── ...")
         sys.exit(1)
 
-    print(f"Found {len(html_files)} HTML files\n")
+    # Group by department for reporting
+    dept_counts = {}
+    for html_file in html_files:
+        # Get department name from path (parent of parent of file)
+        dept = html_file.parent.parent.name
+        dept_counts[dept] = dept_counts.get(dept, 0) + 1
+
+    print(f"Found {len(html_files)} HTML files across {len(dept_counts)} departments:")
+    for dept, count in sorted(dept_counts.items()):
+        print(f"  • {dept}: {count} courses")
+    print()
 
     # Parse all files
     all_response_rows = []
@@ -340,20 +372,33 @@ def main():
 
     parse_errors = []
 
+    current_dept = None
     for i, html_file in enumerate(html_files, 1):
         try:
-            print(f"[{i}/{len(html_files)}] Parsing: {html_file.name}")
+            # Show department header when we switch departments
+            dept = html_file.parent.parent.name
+            if dept != current_dept:
+                current_dept = dept
+                print(f"\n{'='*70}")
+                print(f"Processing {dept}")
+                print(f"{'='*70}")
+
+            print(f"[{i}/{len(html_files)}] {html_file.name}")
             parser = CourseEvaluationParser(str(html_file))
 
             # Collect rows
-            all_response_rows.extend(parser.get_response_rows())
-            all_question_rows.extend(parser.get_question_rows())
-            all_free_text_rows.extend(parser.get_free_text_rows())
+            response_rows = parser.get_response_rows()
+            question_rows = parser.get_question_rows()
+            free_text_rows = parser.get_free_text_rows()
 
-            print(f"  ✓ Course: {parser.course_info['course']}")
-            print(f"    Instructor: {parser.course_info['instructor']}")
-            print(f"    Questions: {len(parser.questions)}")
-            print(f"    Free text responses: {len(parser.get_free_text_rows())}")
+            all_response_rows.extend(response_rows)
+            all_question_rows.extend(question_rows)
+            all_free_text_rows.extend(free_text_rows)
+
+            # Show concise summary
+            course_short = parser.course_info['course'].split(':')[0] if ':' in parser.course_info['course'] else parser.course_info['course']
+            instructor_short = parser.course_info['instructor'].split(',')[0] if ',' in parser.course_info['instructor'] else parser.course_info['instructor']
+            print(f"  ✓ {course_short} - {instructor_short} ({len(parser.questions)} Qs, {len(free_text_rows)} comments)")
 
         except Exception as e:
             error_msg = f"{html_file.name}: {str(e)}"
