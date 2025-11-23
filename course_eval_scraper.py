@@ -9,6 +9,7 @@ import csv
 import time
 import re
 import html as html_lib
+import os
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -122,6 +123,8 @@ class DukeCourseEvalScraper:
 
         self.evaluations = []
         self.last_session_check = time.time()
+        debug_flag = os.getenv("COURSE_EVAL_DEBUG_HTML", "0").lower()
+        self.debug_html = debug_flag in {"1", "true", "yes", "on"}
 
     def check_session(self) -> bool:
         """
@@ -242,11 +245,12 @@ class DukeCourseEvalScraper:
             if title_elem:
                 print(f"  Page title: {title_elem.text.strip()}")
 
-            # Debug: Save response for inspection
-            debug_file = f"debug_search_response_area{area_id}.html"
-            with open(debug_file, 'w', encoding='utf-8') as f:
-                f.write(response.text)
-            print(f"  Saved search response to: {debug_file}")
+            # Debug: Save response for inspection (optional)
+            if self.debug_html:
+                debug_file = f"debug_search_response_area{area_id}.html"
+                with open(debug_file, 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+                print(f"  Saved search response to: {debug_file}")
 
             # Extract search results
             # Results are <li> elements with class "sr-dataitem" and id pattern "sr-{numbers}_{numbers}_{numbers}_{numbers}"
