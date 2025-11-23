@@ -367,6 +367,35 @@ def main():
         print(f"  • {dept}: {len(files)} courses")
     print()
 
+<<<<<<< HEAD
+    # Parse all files and group by department
+    # Structure: dept_name -> { 'path': Path, 'response_rows': [], 'question_rows': [], 'free_text_rows': [] }
+    dept_data = {}
+    
+    parse_errors = []
+    total_success = 0
+
+    current_dept = None
+    for i, html_file in enumerate(html_files, 1):
+        try:
+            # Show department header when we switch departments
+            dept_name = html_file.parent.parent.name
+            dept_path = html_file.parent.parent
+            
+            if dept_name != current_dept:
+                current_dept = dept_name
+                print(f"\n{'='*70}")
+                print(f"Processing {dept_name}")
+                print(f"{'='*70}")
+                
+            if dept_name not in dept_data:
+                dept_data[dept_name] = {
+                    'path': dept_path,
+                    'response_rows': [],
+                    'question_rows': [],
+                    'free_text_rows': []
+                }
+=======
     # Process each department separately
     total_success = 0
     total_errors = 0
@@ -380,6 +409,7 @@ def main():
         dept_question_rows = []
         dept_free_text_rows = []
         dept_errors = []
+>>>>>>> 77cd2f33b8cc72d46054c516194fbf8d6c54e94a
 
         # Parse all files in this department
         for i, html_file in enumerate(dept_html_files, 1):
@@ -392,9 +422,17 @@ def main():
                 question_rows = parser.get_question_rows()
                 free_text_rows = parser.get_free_text_rows()
 
+<<<<<<< HEAD
+            dept_data[dept_name]['response_rows'].extend(response_rows)
+            dept_data[dept_name]['question_rows'].extend(question_rows)
+            dept_data[dept_name]['free_text_rows'].extend(free_text_rows)
+            
+            total_success += 1
+=======
                 dept_response_rows.extend(response_rows)
                 dept_question_rows.extend(question_rows)
                 dept_free_text_rows.extend(free_text_rows)
+>>>>>>> 77cd2f33b8cc72d46054c516194fbf8d6c54e94a
 
                 # Show concise summary
                 course_short = parser.course_info['course'].split(':')[0] if ':' in parser.course_info['course'] else parser.course_info['course']
@@ -466,6 +504,79 @@ def main():
                 print(f"    ... and {len(dept_errors) - 5} more")
 
     print(f"\n{'='*70}")
+<<<<<<< HEAD
+    print(f"Parsing complete:")
+    print(f"  Successful: {total_success}/{len(html_files)}")
+    print(f"  Failed: {len(parse_errors)}")
+
+    if parse_errors:
+        print(f"\nErrors encountered:")
+        for error in parse_errors[:10]:  # Show first 10 errors
+            print(f"  - {error}")
+        if len(parse_errors) > 10:
+            print(f"  ... and {len(parse_errors) - 10} more")
+
+    # Write CSV files per department
+    print(f"\n{'='*70}")
+    print("Writing CSV files per department...")
+
+    files_written = 0
+    
+    for dept_name, data in sorted(dept_data.items()):
+        dept_path = data['path']
+        print(f"\nWriting files for {dept_name} in {dept_path}...")
+        
+        # Response-level CSV
+        responses_csv = dept_path / 'evaluations_responses.csv'
+        with open(responses_csv, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = [
+                'filename', 'semester', 'course', 'instructor',
+                'question_number', 'question_text',
+                'response_option', 'weight', 'frequency', 'percentage',
+                'response_rate', 'mean', 'std', 'median'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data['response_rows'])
+        print(f"  ✓ {responses_csv.name} ({len(data['response_rows'])} rows)")
+
+        # Question-level CSV
+        questions_csv = dept_path / 'evaluations_questions.csv'
+        with open(questions_csv, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = [
+                'filename', 'semester', 'course', 'instructor',
+                'question_number', 'question_text',
+                'response_rate', 'mean', 'std', 'median',
+                'total_responses', 'response_distribution'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data['question_rows'])
+        print(f"  ✓ {questions_csv.name} ({len(data['question_rows'])} rows)")
+
+        # Free text CSV
+        free_text_csv = dept_path / 'evaluations_free_text.csv'
+        with open(free_text_csv, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = [
+                'filename', 'semester', 'course', 'instructor',
+                'question_number', 'question_text', 'response_text'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data['free_text_rows'])
+        print(f"  ✓ {free_text_csv.name} ({len(data['free_text_rows'])} rows)")
+        
+        files_written += 3
+
+    print(f"\n{'='*70}")
+    print("Done! CSV files generated successfully.")
+    print(f"\nSummary:")
+    print(f"  Total departments processed: {len(dept_data)}")
+    print(f"  Total files written: {files_written}")
+    print(f"  Total response rows: {sum(len(d['response_rows']) for d in dept_data.values())}")
+    print(f"  Total question rows: {sum(len(d['question_rows']) for d in dept_data.values())}")
+    print(f"  Total free text responses: {sum(len(d['free_text_rows']) for d in dept_data.values())}")
+=======
     print("Done! All departments processed.")
     print(f"\nSummary:")
     print(f"  Departments processed: {len(dept_files)}")
@@ -476,6 +587,7 @@ def main():
         dept_path = target_dir / 'course_evaluations' / dept_name
         if dept_path.exists():
             print(f"  • {dept_path}/")
+>>>>>>> 77cd2f33b8cc72d46054c516194fbf8d6c54e94a
 
 
 if __name__ == '__main__':
