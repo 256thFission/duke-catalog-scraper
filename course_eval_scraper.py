@@ -480,13 +480,6 @@ class DukeCourseEvalScraper:
             if delay > 0:
                 time.sleep(delay)
 
-            # Request the report page
-            department_codes = eval_data.get('department_codes', [])
-            dept_str = ', '.join(department_codes) if department_codes else eval_data.get('area', 'UNKNOWN')
-            print(f"Downloading report for {eval_data['course_code']} - {eval_data['instructor']} [{dept_str}]")
-            response = self.session.get(report_url)
-            response.raise_for_status()
-
             # Generate filename
             safe_course = re.sub(r'[^\w\-]', '_', eval_data['course_code'])
             safe_instructor = re.sub(r'[^\w\-]', '_', eval_data['instructor'])
@@ -494,19 +487,38 @@ class DukeCourseEvalScraper:
 
             filename = f"{safe_course}_{safe_instructor}_{safe_term}.html"
 
+            department_codes = eval_data.get('department_codes', [])
+
             # If no department codes found, use the area field as fallback
             if not department_codes:
                 department_codes = [eval_data.get('area', 'UNKNOWN')]
 
-            # Save to all relevant department folders
+            # Check if files already exist in all locations
+            all_exist = True
+            target_paths = []
             for dept_code in department_codes:
                 dept_output_dir = base_output_dir / dept_code / "reports"
-                dept_output_dir.mkdir(parents=True, exist_ok=True)
+                target_path = dept_output_dir / filename
+                target_paths.append(target_path)
+                if not target_path.exists():
+                    all_exist = False
+            
+            if all_exist and target_paths:
+                print(f"  Skipping download (already exists): {filename}")
+                return target_paths
 
-                filepath = dept_output_dir / filename
+            # Request the report page
+            dept_str = ', '.join(department_codes) if department_codes else eval_data.get('area', 'UNKNOWN')
+            print(f"Downloading report for {eval_data['course_code']} - {eval_data['instructor']} [{dept_str}]")
+            response = self.session.get(report_url)
+            response.raise_for_status()
+
+            # Save to all relevant department folders
+            for filepath in target_paths:
+                filepath.parent.mkdir(parents=True, exist_ok=True)
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write(response.text)
-
+                
                 saved_paths.append(filepath)
 
             # Print summary of where files were saved

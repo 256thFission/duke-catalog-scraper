@@ -407,7 +407,10 @@ def main():
                 print(f"  ✗ Error: {str(e)}")
 
         # Write CSV files for this department
-        dept_dir = html_file.parent.parent  # Get department directory
+        if not dept_html_files:
+            continue
+            
+        dept_dir = dept_html_files[0].parent.parent  # Get department directory
 
         print(f"\nWriting CSV files to {dept_dir}/...")
 
@@ -473,9 +476,10 @@ def main():
     print(f"  Total errors: {total_errors}")
     print(f"\nCSV files have been written to each department folder:")
     for dept_name in sorted(dept_files.keys()):
-        dept_path = target_dir / 'course_evaluations' / dept_name
-        if dept_path.exists():
-            print(f"  • {dept_path}/")
+        if dept_name in dept_files and dept_files[dept_name]:
+             dept_path = dept_files[dept_name][0].parent.parent
+             if dept_path.exists():
+                 print(f"  • {dept_path}/")
 
 
 if __name__ == '__main__':

@@ -38,7 +38,7 @@ OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "data")) / "course_evaluations"
 REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0.5"))
 
 # Path to area codes CSV file
-AREA_CODES_CSV = Path(__file__).parent.parent / "utils" / "area_codes.csv"
+AREA_CODES_CSV = Path(__file__).parent.parent / "utils" / "area_catalog.csv"
 
 # Search parameters
 # Leave empty for all terms/years
