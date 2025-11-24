@@ -50,10 +50,6 @@ DEPARTMENTS_TO_SCRAPE = [
 SEARCH_TERM_ID = ""  # e.g., "9169" for Fall 2023
 SEARCH_YEAR = ""     # e.g., "2023"
 
-# Generic search term to use for each department
-# This should return all courses in that department
-COURSE_SEARCH_TERM = "COMPSCI"  # Common letter that appears in most course codes
-
 
 # ============================================================================
 # MAIN SCRIPT
@@ -165,10 +161,11 @@ def main():
         print("-" * 60)
 
         try:
-            # Search for evaluations in this department
+            # Search for ALL evaluations in this department
+            # Searching by area_id only ensures we get all courses, including cross-listed ones
             results = scraper.search_evaluations(
                 area_id=area_id,
-                course=COURSE_SEARCH_TERM,
+                course="",  # Empty = get all courses in this department
                 term_id=SEARCH_TERM_ID,
                 year=SEARCH_YEAR,
                 delay=REQUEST_DELAY
@@ -182,7 +179,7 @@ def main():
                 dept_output_dir = OUTPUT_DIR / dept_code
                 dept_output_dir.mkdir(parents=True, exist_ok=True)
 
-                # Save metadata for this department
+                # Save metadata for this department search
                 scraper.save_metadata_json(
                     str(dept_output_dir / f"{dept_code}_metadata.json")
                 )
@@ -191,13 +188,14 @@ def main():
                 )
 
                 # Download report HTML files
-                print(f"\nDownloading {len(results)} reports for {dept_code}...")
-                html_output_dir = dept_output_dir / "reports"
+                # Reports will be automatically saved to all relevant department folders
+                # based on cross-listed course codes parsed from titles
+                print(f"\nDownloading {len(results)} reports (will save to cross-listed departments)...")
                 saved_files = scraper.download_all_reports(
-                    str(html_output_dir),
+                    str(OUTPUT_DIR),  # Base directory - subdirs created automatically
                     delay=REQUEST_DELAY
                 )
-                print(f"Saved {len(saved_files)} reports to {html_output_dir}")
+                print(f"Saved to {len(saved_files)} total locations")
 
                 # Clear evaluations list for next department
                 scraper.evaluations = []

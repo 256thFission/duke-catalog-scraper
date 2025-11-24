@@ -18,6 +18,32 @@ from bs4 import BeautifulSoup
 import requests
 
 
+def extract_department_codes_from_title(title: str) -> List[str]:
+    """
+    Extract all department codes from a course title.
+
+    Handles cross-listed courses like:
+    "TOPICS IN CUL. ANTHROPOLOGY.CULANTH-190S-01.AAAS-190S-01.AMES-190S-01.ICS-190S-01."
+
+    Returns: List of unique department codes (e.g., ['CULANTH', 'AAAS', 'AMES', 'ICS'])
+    """
+    # Pattern to match course codes like "DEPT-###-##" or "DEPT-###S-##"
+    # Department code is all uppercase letters before the dash
+    pattern = r'\b([A-Z]+(?:&[A-Z]+)?)-\d+[A-Z]?-\d+\b'
+
+    matches = re.findall(pattern, title)
+
+    # Return unique department codes, preserving order
+    seen = set()
+    unique_codes = []
+    for code in matches:
+        if code not in seen:
+            seen.add(code)
+            unique_codes.append(code)
+
+    return unique_codes
+
+
 def complete_saml_flow(session: requests.Session, initial_response: requests.Response, max_redirects: int = 10) -> requests.Response:
     """
     Automatically detect and submit SAML forms until reaching the final authenticated page.
@@ -395,6 +421,9 @@ class DukeCourseEvalScraper:
                     data_id_value = view_report_btn.get(data_id_key, '')
                     data_ids[data_id_key] = data_id_value
 
+            # Extract all cross-listed department codes from the title
+            department_codes = extract_department_codes_from_title(title)
+
             return {
                 'uid': uid,
                 'course_code': course_code,
@@ -404,6 +433,7 @@ class DukeCourseEvalScraper:
                 'area': area,
                 'response_rate': response_rate,
                 'data_ids': data_ids,
+                'department_codes': department_codes,  # List of all cross-listed departments
                 'scraped_at': datetime.now().isoformat()
             }
 
@@ -414,20 +444,23 @@ class DukeCourseEvalScraper:
     def download_report(
         self,
         eval_data: Dict[str, Any],
-        output_dir: Path,
+        base_output_dir: Path,
         delay: float = 0.5
-    ) -> Optional[Path]:
+    ) -> List[Path]:
         """
         Download the evaluation report HTML for a given evaluation.
+        Saves to all relevant department folders based on cross-listed codes.
 
         Args:
-            eval_data: Evaluation metadata dictionary with data_ids
-            output_dir: Directory to save the report HTML
+            eval_data: Evaluation metadata dictionary with data_ids and department_codes
+            base_output_dir: Base output directory (will create DEPT/reports/ subdirs)
             delay: Delay before request (default: 0.5)
 
         Returns:
-            Path to the saved HTML file, or None if failed
+            List of paths where the report was saved (one per department)
         """
+        saved_paths = []
+
         try:
             # Keep session alive
             self.keep_session_alive()
@@ -448,7 +481,9 @@ class DukeCourseEvalScraper:
                 time.sleep(delay)
 
             # Request the report page
-            print(f"Downloading report for {eval_data['course_code']} - {eval_data['instructor']}")
+            department_codes = eval_data.get('department_codes', [])
+            dept_str = ', '.join(department_codes) if department_codes else eval_data.get('area', 'UNKNOWN')
+            print(f"Downloading report for {eval_data['course_code']} - {eval_data['instructor']} [{dept_str}]")
             response = self.session.get(report_url)
             response.raise_for_status()
 
@@ -458,19 +493,33 @@ class DukeCourseEvalScraper:
             safe_term = re.sub(r'[^\w\-]', '_', eval_data['term'])
 
             filename = f"{safe_course}_{safe_instructor}_{safe_term}.html"
-            filepath = output_dir / filename
 
-            # Save HTML
-            output_dir.mkdir(parents=True, exist_ok=True)
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(response.text)
+            # If no department codes found, use the area field as fallback
+            if not department_codes:
+                department_codes = [eval_data.get('area', 'UNKNOWN')]
 
-            print(f"  Saved to: {filepath}")
-            return filepath
+            # Save to all relevant department folders
+            for dept_code in department_codes:
+                dept_output_dir = base_output_dir / dept_code / "reports"
+                dept_output_dir.mkdir(parents=True, exist_ok=True)
+
+                filepath = dept_output_dir / filename
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+
+                saved_paths.append(filepath)
+
+            # Print summary of where files were saved
+            if len(saved_paths) > 1:
+                print(f"  Saved to {len(saved_paths)} departments: {', '.join(department_codes)}")
+            elif saved_paths:
+                print(f"  Saved to: {saved_paths[0]}")
+
+            return saved_paths
 
         except requests.exceptions.RequestException as e:
             print(f"  Error downloading report: {e}")
-            return None
+            return []
 
     def download_all_reports(
         self,
@@ -479,13 +528,14 @@ class DukeCourseEvalScraper:
     ) -> List[Path]:
         """
         Download all evaluation reports from the current search results.
+        Each report is saved to all relevant department folders.
 
         Args:
-            output_dir: Directory to save report HTML files
+            output_dir: Base output directory (DEPT/reports/ subdirs will be created)
             delay: Delay between downloads (default: 0.5)
 
         Returns:
-            List of paths to saved HTML files
+            List of all paths where files were saved
         """
         output_path = Path(output_dir)
         saved_files = []
@@ -494,11 +544,12 @@ class DukeCourseEvalScraper:
 
         for i, eval_data in enumerate(self.evaluations, 1):
             print(f"[{i}/{len(self.evaluations)}] ", end='')
-            filepath = self.download_report(eval_data, output_path, delay)
-            if filepath:
-                saved_files.append(filepath)
+            filepaths = self.download_report(eval_data, output_path, delay)
+            saved_files.extend(filepaths)
 
-        print(f"\nDownloaded {len(saved_files)}/{len(self.evaluations)} reports")
+        # Count unique evaluations (not total files saved)
+        unique_reports = len(self.evaluations)
+        print(f"\nDownloaded {unique_reports} reports to {len(saved_files)} locations")
         return saved_files
 
     def save_metadata_json(self, filepath: str, pretty: bool = True) -> None:
@@ -537,6 +588,7 @@ class DukeCourseEvalScraper:
         fieldnames = [
             'uid', 'course_code', 'title', 'instructor',
             'term', 'area', 'response_rate',
+            'department_codes',  # Cross-listed department codes
             'data-id0', 'data-id1', 'data-id2', 'data-id3',
             'scraped_at'
         ]
@@ -546,7 +598,7 @@ class DukeCourseEvalScraper:
             writer.writeheader()
 
             for eval_data in self.evaluations:
-                row = {k: eval_data.get(k, '') for k in fieldnames if k not in ['data-id0', 'data-id1', 'data-id2', 'data-id3']}
+                row = {k: eval_data.get(k, '') for k in fieldnames if k not in ['data-id0', 'data-id1', 'data-id2', 'data-id3', 'department_codes']}
 
                 # Add data-id fields
                 data_ids = eval_data.get('data_ids', {})
@@ -554,6 +606,10 @@ class DukeCourseEvalScraper:
                 row['data-id1'] = data_ids.get('data-id1', '')
                 row['data-id2'] = data_ids.get('data-id2', '')
                 row['data-id3'] = data_ids.get('data-id3', '')
+
+                # Add department codes as comma-separated string
+                dept_codes = eval_data.get('department_codes', [])
+                row['department_codes'] = ', '.join(dept_codes) if dept_codes else ''
 
                 writer.writerow(row)
 
