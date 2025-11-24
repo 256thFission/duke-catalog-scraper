@@ -197,8 +197,8 @@ def main():
                 )
                 print(f"Saved to {len(saved_files)} total locations")
 
-                # Clear evaluations list for next department
-                scraper.evaluations = []
+            # Always clear evaluations list for next department (even if no results)
+            scraper.evaluations = []
 
         except Exception as e:
             print(f"ERROR scraping {dept_code}: {e}")
