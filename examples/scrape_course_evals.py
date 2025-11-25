@@ -180,6 +180,9 @@ def main():
 
                 scraper.save_metadata_json(str(dept_output_dir / f"{dept_code}_metadata.json"))
                 scraper.save_metadata_csv(str(dept_output_dir / f"{dept_code}_metadata.csv"))
+                
+                # Save metadata to crosslisted departments (e.g., ECE-250D also saves to COMPSCI)
+                scraper.save_metadata_to_crosslisted_departments(OUTPUT_DIR, dept_code)
 
                 # Download reports (will save to all cross-listed departments automatically)
                 saved_files = scraper.download_all_reports(str(OUTPUT_DIR), delay=REQUEST_DELAY)
