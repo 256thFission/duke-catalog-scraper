@@ -1,6 +1,9 @@
 # Duke Course Catalog Scraper
 
-A Python utility to scrape course data from DukeHub using the class search API.
+A Python utility to scrape course data from DukeHub. Supports two modes:
+
+1. **Class Search** (`DukeCourseScraper`) - Scrape class sections for a specific term with enrollment info
+2. **Course Catalog** (`DukeCatalogScraper`) - Scrape ALL course definitions from the catalog with descriptions and attributes
 
 ## Quick Start
 
@@ -112,6 +115,82 @@ You can export results via:
 - `save_json(path)` – writes all courses to a JSON file.
 - `save_csv(path, include_meetings=True)` – writes a CSV file, optionally
   flattening meetings so each meeting gets its own row.
+
+---
+
+## Course Catalog Scraper
+
+The `DukeCatalogScraper` fetches **all course definitions** from the Duke Course Catalog, not just term-specific sections. This gives you access to:
+
+- Complete course descriptions
+- Course attributes (areas of knowledge, requirements satisfied)
+- All subjects/departments
+- Course components (lecture, lab, discussion, etc.)
+
+### Quick Start - Catalog
+
+```bash
+python examples/scrape_catalog.py
+```
+
+### Catalog Usage
+
+```python
+from duke_sso import DukeSSOAuth
+from duke_catalog_scraper import DukeCatalogScraper
+
+auth = DukeSSOAuth()
+auth.authenticate()
+
+scraper = DukeCatalogScraper(auth)
+
+# Scrape all undergraduate courses
+courses = scraper.scrape_all_courses(
+    acad_career="UGRD",      # "UGRD", "GRAD", "LAW", "MED"
+    include_details=True,     # Fetch full descriptions
+    delay=0.3                 # Request delay
+)
+
+# Save results
+scraper.save_json("data/catalog.json")
+scraper.save_csv("data/catalog.csv")
+```
+
+### Filter by Subject
+
+```python
+# Only scrape specific subjects
+courses = scraper.scrape_all_courses(
+    acad_career="UGRD",
+    subjects_filter=["COMPSCI", "MATH", "PHYSICS"]
+)
+```
+
+### Catalog API Methods
+
+| Method | Description |
+|--------|-------------|
+| `get_subjects(institution, acad_career)` | Get all subjects for an academic career |
+| `get_subject_courses(subject, institution, acad_career)` | Get courses for a subject |
+| `get_course_details(course, institution)` | Get detailed info for a course |
+| `scrape_all_courses(...)` | Scrape complete catalog |
+
+### Catalog Course Fields
+
+Each course includes:
+
+| Field | Description |
+|-------|-------------|
+| `subject` | Subject code (e.g., "COMPSCI") |
+| `catalog_nbr` | Course number (e.g., "201") |
+| `crse_id` | Unique course ID |
+| `descr` | Course title |
+| `acad_career` | Academic career (UGRD, GRAD, etc.) |
+| `typ_offr` | Typical offering (FALL, SPRING, FALL-SPRNG) |
+| `details.descrlong` | Full course description |
+| `details.attributes` | Course attributes (areas of knowledge) |
+| `details.components` | Course components (lecture, lab, etc.) |
+| `details.units_minimum/maximum` | Credit hours |
 
 ## Disclaimer
 

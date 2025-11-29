@@ -3,7 +3,7 @@ duke_session.pkl
 *.pkl
 
 # Output data
-data/
+data2/
 *.json
 
 # Python
