@@ -29,12 +29,12 @@ class DukeCourseScraper:
 
     CLASS_SEARCH_URL = (
         "https://dukehub.duke.edu/psc/CSPRD01/EMPLOYEE/SA/s/"
-        "WEBLIB_HCX_CM.H_CLASS_SEARCH.FieldFormula.IScript_ClassSearch"
+        "WEBLIB_HCX_CM.H_BROWSE_CLASSES.FieldFormula.IScript_BrowseCourses"
     )
 
     CLASS_DETAILS_URL = (
         "https://dukehub.duke.edu/psc/CSPRD01/EMPLOYEE/SA/s/"
-        "WEBLIB_HCX_CM.H_CLASS_SEARCH.FieldFormula.IScript_ClassDetails"
+        "WEBLIB_HCX_CM.H_BROWSE_CLASSES.FieldFormula.IScript_BrowseSections"
     )
 
     def __init__(self, auth: DukeSSOAuth):
@@ -47,153 +47,70 @@ class DukeCourseScraper:
         self.auth = auth
         self.courses = []
 
-    def get_course_details(self, term: str, class_nbr: str, institution: str = "DUKEU") -> str:
+    def get_sections(self, term: str, course: Dict[str, Any], acad_career: str = "UGRD", institution: str = "DUKEU") -> List[Dict[str, Any]]:
+        """Fetch sections for a specific course via BrowseSections."""
         params = {
             "institution": institution,
             "term": term,
-            "class_nbr": class_nbr,
+            "x_acad_career": acad_career,
+            "subject": course.get("subject", ""),
+            "catalog_nbr": course.get("catalog_nbr", ""),
+            "course_id": course.get("crse_id", ""),
+            "campus": "",
+            "location": "",
         }
 
         try:
             response = self.auth.get(self.CLASS_DETAILS_URL, params=params)
             response.raise_for_status()
             data = response.json()
-            description = data.get("section_info", {}).get("catalog_descr", {}).get("crse_catalog_description", "")
-            return description
+            return data.get("sections", [])
         except Exception as e:
-            print(f"Warning: Failed to fetch details for class {class_nbr}. Error: {e}")
-            return ""
+            print(f"Warning: Failed to fetch sections for {course.get('subject', '')} {course.get('catalog_nbr', '')}. Error: {e}")
+            return []
 
-    def search_courses(
+    def browse_courses(
         self,
         term: str,
         institution: str = "DUKEU",
         subject: str = "",
-        catalog_nbr: str = "",
-        enrl_stat: str = "",
-        keyword: str = "",
-        instructor_name: str = "",
-        campus: str = "",
         acad_career: str = "",
-        max_pages: Optional[int] = None,
-        delay: float = 0.5,
-        **kwargs
     ) -> List[Dict[str, Any]]:
         """
-        Search for courses with the given criteria.
+        Browse all courses for a term via the DukeHub browse-classes API.
+
+        Pass subject="" to retrieve every subject in one request.
 
         Args:
-            term: Term code (e.g., "1950" for Spring 2026)
+            term: Term code (e.g., "1970" for Fall 2026)
             institution: Institution code (default: "DUKEU")
-            subject: Subject code (e.g., "COMPSCI")
-            catalog_nbr: Catalog number (e.g., "101")
-            enrl_stat: Enrollment status ("O" for Open, "C" for Closed, "" for all)
-            keyword: Search keyword
-            instructor_name: Instructor last name
-            campus: Campus code
-            acad_career: Academic career (e.g., "UGRD" for undergraduate)
-            max_pages: Maximum number of pages to fetch (None for all)
-            delay: Delay between requests in seconds (default: 0.5)
-            **kwargs: Additional query parameters
+            subject: Subject filter ("" for all)
+            acad_career: Academic career (e.g., "UGRD")
 
         Returns:
-            List of course dictionaries
+            List of course dicts (crse_id, descr, subject, catalog_nbr)
         """
-        self.courses = []
-        page = 1
-        total_pages = None
+        params = {
+            "institution": institution,
+            "term": term,
+            "acad_career": acad_career,
+            "subject": subject,
+        }
 
-        print(f"Searching courses for term {term}...")
+        print(f"Browsing courses for term {term}...")
 
-        while True:
-            # Build query parameters
-            params = {
-                "institution": institution,
-                "term": term,
-                "subject": subject,
-                "catalog_nbr": catalog_nbr,
-                "enrl_stat": enrl_stat,
-                "keyword": keyword,
-                "instructor_name": instructor_name,
-                "campus": campus,
-                "x_acad_career": acad_career,
-                "page": page,
-                # Default empty parameters
-                "date_from": "",
-                "date_thru": "",
-                "subject_like": "",
-                "start_time_equals": "",
-                "end_time_equals": "",
-                "start_time_ge": "",
-                "end_time_le": "",
-                "days": "",
-                "location": "",
-                "acad_group": "",
-                "rqmnt_designtn": "",
-                "instruction_mode": "",
-                "class_nbr": "",
-                "acad_org": "",
-                "crse_attr": "",
-                "crse_attr_value": "",
-                "instr_first_name": "",
-                "session_code": "",
-                "units": "",
-                "trigger_search": "",
-            }
+        try:
+            response = self.auth.get(self.CLASS_SEARCH_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+            courses = data.get("courses", [])
+            print(f"Found {len(courses)} courses")
+            return courses
 
-            # Add any additional parameters
-            params.update(kwargs)
-
-            try:
-                # Make the request
-                response = self.auth.get(self.CLASS_SEARCH_URL, params=params)
-                response.raise_for_status()
-
-                # Parse JSON response
-                data = response.json()
-
-                # Get total pages from first response
-                if total_pages is None and "pageCount" in data:
-                    total_pages = data.get("pageCount", 1)
-                    print(f"Found {total_pages} pages of results")
-
-                # Extract courses
-                courses = data.get("classes", [])
-                if not courses:
-                    print(f"No courses found on page {page}")
-                    break
-
-                print(f"Fetched page {page}/{total_pages or '?'} - {len(courses)} courses")
-                for course in courses:
-                    class_nbr = course.get("class_nbr")
-                    if class_nbr:
-                        long_desc = self.get_course_details(term, str(class_nbr), institution)
-                        course["catalog_description"] = long_desc
-                self.courses.extend(courses)
-
-                # Check if we should continue
-                if max_pages and page >= max_pages:
-                    print(f"Reached max pages limit ({max_pages})")
-                    break
-
-                if total_pages and page >= total_pages:
-                    print("Reached last page")
-                    break
-
-                # Move to next page
-                page += 1
-
-                # Delay to avoid overwhelming the server
-                if delay > 0:
-                    time.sleep(delay)
-
-            except requests.exceptions.RequestException as e:
-                raise DukeCourseScraperError(f"Request failed on page {page}: {e}")
-            except json.JSONDecodeError as e:
-                raise DukeCourseScraperError(f"Failed to parse JSON on page {page}: {e}")
-
-        print(f"Scraping complete. Total courses: {len(self.courses)}")
-        return self.courses
+        except requests.exceptions.RequestException as e:
+            raise DukeCourseScraperError(f"Request failed: {e}")
+        except json.JSONDecodeError as e:
+            raise DukeCourseScraperError(f"Failed to parse JSON: {e}")
 
     def save_json(self, filepath: str, pretty: bool = True) -> None:
         """

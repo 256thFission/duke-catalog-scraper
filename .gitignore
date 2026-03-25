@@ -55,6 +55,3 @@ Thumbs.db
 # Jupyter Notebooks
 .ipynb_checkpoints
 *.ipynb
-debug_search_response_area98827.html
-.gitignore
-sample_class.html

@@ -8,6 +8,7 @@ Configuration is read from the .env file (see .env.example).
 """
 
 import os
+import time
 from pathlib import Path
 import json
 
@@ -49,7 +50,7 @@ def main():
             print("Please set DUKE_NETID and DUKE_PASSWORD environment variables before running this script.")
             return
 
-        duo_device_id = None  # Use default Duo device
+        duo_device_id = os.getenv("DUO_DEVICE_ID") or None
 
         if not auth.login_with_credentials(username, password, duo_device_id):
             print("\nCredential-based login failed. Check your NetID/password and Duo approval.")
@@ -66,19 +67,31 @@ def main():
     print(f"Downloading all undergraduate (UGRD) courses for term {term}")
     print("=" * 60)
 
-    # Optional limit via MAX_PAGES; default is None for all pages
-    max_pages_env = os.getenv("MAX_PAGES")
-    max_pages = int(max_pages_env) if max_pages_env else None
-
-    courses = scraper.search_courses(
-        term=term,
-        acad_career="UGRD",   # Undergraduate courses only
-        max_pages=max_pages,    # None means fetch all pages
-        delay=delay,
-    )
+    # Step 1: Fetch all course catalog entries in one request
+    courses = scraper.browse_courses(term=term, acad_career="UGRD")
 
     if not courses:
         print("No courses found.")
+        return
+
+    # Step 2: Fetch sections for each course
+    all_sections = []
+    for idx, course in enumerate(courses, 1):
+        subj = course.get("subject", "")
+        cat = course.get("catalog_nbr", "")
+        print(f"[{idx}/{len(courses)}] Fetching sections for {subj} {cat}")
+
+        sections = scraper.get_sections(term=term, course=course, acad_career="UGRD")
+        all_sections.extend(sections)
+
+        if delay > 0:
+            time.sleep(delay)
+
+    print(f"\nTotal sections fetched: {len(all_sections)}")
+    scraper.courses = all_sections
+
+    if not all_sections:
+        print("No sections found.")
         return
 
     # Save results
